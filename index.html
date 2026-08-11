@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3Dかくれんぼハンター</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main id="game-shell">
+      <section id="hud" aria-label="ゲーム情報">
+        <div>
+          <p class="eyebrow">Three.js Hide & Seek</p>
+          <h1>3Dかくれんぼハンター</h1>
+        </div>
+        <div id="stats">
+          <span>見つけた: <strong id="caught-count">0</strong>/<strong id="total-count">0</strong></span>
+          <span>残り時間: <strong id="timer">120</strong>s</span>
+        </div>
+        <button id="restart" type="button">リスタート</button>
+      </section>
+
+      <canvas id="game-canvas" aria-label="3Dかくれんぼゲーム画面"></canvas>
+
+      <section id="help">
+        <p><strong>操作:</strong> WASD/矢印キーで移動、マウスで視点移動、クリックでポインターロック。</p>
+        <p><strong>目的:</strong> 障害物に隠れて逃げるAIを近づいて捕まえよう。AIはあなたから逃げ、近くの隠れ場所へ向かいます。</p>
+      </section>
+
+      <div id="message" role="status" aria-live="polite">クリックして開始</div>
+    </main>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
