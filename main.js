@@ -118,20 +118,57 @@ function createChameleonMaterial(index) {
   });
 }
 
+
 function makeEye(x) {
   const eye = new THREE.Group();
+  const turret = new THREE.Mesh(
+    new THREE.SphereGeometry(0.24, 18, 12),
+    new THREE.MeshStandardMaterial({ color: 0x9fd35f, roughness: 0.7 })
+  );
+  turret.scale.set(1.05, 0.9, 1.25);
   const ball = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 16, 10),
+    new THREE.SphereGeometry(0.13, 16, 10),
     new THREE.MeshStandardMaterial({ color: 0xf8ffe8, roughness: 0.25 })
   );
   const pupil = new THREE.Mesh(
-    new THREE.SphereGeometry(0.07, 10, 8),
+    new THREE.SphereGeometry(0.055, 10, 8),
     new THREE.MeshStandardMaterial({ color: 0x101315 })
   );
-  pupil.position.set(0, 0.01, -0.13);
-  eye.position.set(x, 0.35, -0.45);
-  eye.add(ball, pupil);
-  return eye;
+  ball.position.set(0, 0.02, -0.18);
+  pupil.position.set(0, 0.02, -0.29);
+  eye.position.set(x, 0.36, -0.54);
+  eye.add(turret, ball, pupil);
+  return { eye, pupil, turret };
+}
+
+function makeLeg(x, z, material) {
+  const leg = new THREE.Group();
+  const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.5, 5, 8), material);
+  upper.rotation.z = x > 0 ? -0.9 : 0.9;
+  upper.rotation.x = z > 0 ? 0.45 : -0.45;
+  upper.position.set(x * 0.55, -0.32, z);
+
+  const foot = new THREE.Group();
+  foot.position.set(x * 0.88, -0.62, z + (z > 0 ? 0.1 : -0.1));
+  for (const spread of [-0.22, 0.22]) {
+    const toe = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.28, 4, 6), material);
+    toe.rotation.x = Math.PI / 2;
+    toe.rotation.z = spread * (x > 0 ? 1 : -1);
+    toe.position.set(0, 0, spread);
+    foot.add(toe);
+  }
+  leg.add(upper, foot);
+  return leg;
+}
+
+function makeStripe(z, hueShift) {
+  const stripe = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 0.92, 0.04),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color(0xd9ff62).offsetHSL(hueShift, 0, 0), emissive: 0x223400, emissiveIntensity: 0.15 })
+  );
+  stripe.position.set(0, 0.02, z);
+  stripe.rotation.y = Math.PI / 2;
+  return stripe;
 }
 
 function createHider(index, x, z) {
@@ -151,22 +188,40 @@ function createHider(index, x, z) {
   head.castShadow = true;
   group.add(head);
 
-  const crest = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 5), material);
-  crest.rotation.x = Math.PI;
-  crest.position.set(0, 0.65, -0.56);
-  crest.castShadow = true;
-  group.add(crest);
+  const casque = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.9, 5), material);
+  casque.scale.set(0.75, 1.35, 0.55);
+  casque.rotation.x = Math.PI;
+  casque.position.set(0, 0.86, -0.48);
+  casque.castShadow = true;
+  group.add(casque);
+
+  const dorsalSpines = [];
+  for (let i = 0; i < 7; i += 1) {
+    const spine = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.28, 5), material);
+    spine.position.set(0, 0.63, -0.35 + i * 0.22);
+    spine.rotation.x = Math.PI;
+    spine.castShadow = true;
+    dorsalSpines.push(spine);
+    group.add(spine);
+  }
 
   const belly = new THREE.Mesh(new THREE.SphereGeometry(0.48, 18, 10), bellyMaterial);
   belly.scale.set(1.15, 0.5, 0.78);
   belly.position.set(0, -0.08, 0.08);
   group.add(belly);
 
-  const tail = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 10, 28, Math.PI * 1.55), material);
-  tail.rotation.set(Math.PI / 2, 0, Math.PI * 0.65);
-  tail.position.set(0, 0.02, 0.92);
+  const tail = new THREE.Mesh(new THREE.TorusKnotGeometry(0.26, 0.055, 56, 8, 2, 3), material);
+  tail.scale.set(1.15, 1.15, 0.45);
+  tail.rotation.set(Math.PI / 2, 0, Math.PI * 0.8);
+  tail.position.set(0, 0.02, 1.05);
   tail.castShadow = true;
   group.add(tail);
+
+  const legs = [makeLeg(-1, -0.35, material), makeLeg(1, -0.35, material), makeLeg(-1, 0.45, material), makeLeg(1, 0.45, material)];
+  legs.forEach((leg) => group.add(leg));
+
+  const stripes = [-0.28, -0.02, 0.24, 0.5].map((z, stripeIndex) => makeStripe(z, stripeIndex * 0.08));
+  stripes.forEach((stripe) => group.add(stripe));
 
   const tongue = new THREE.Mesh(
     new THREE.CylinderGeometry(0.035, 0.02, 1.15, 8),
@@ -177,12 +232,16 @@ function createHider(index, x, z) {
   tongue.visible = false;
   group.add(tongue);
 
-  group.add(makeEye(-0.24), makeEye(0.24));
+  const leftEye = makeEye(-0.28);
+  const rightEye = makeEye(0.28);
+  group.add(leftEye.eye, rightEye.eye);
   group.position.set(x, 1, z);
   scene.add(group);
   hiders.push({
     group,
-    bodyParts: [body, head, crest, belly, tail],
+    bodyParts: [body, head, casque, belly, tail, ...dorsalSpines, ...legs],
+    stripeParts: stripes,
+    eyes: [leftEye, rightEye],
     tongue,
     material,
     bellyMaterial,
@@ -277,7 +336,17 @@ function updateCamouflage(hider, distanceToPlayer) {
   hider.bodyParts.forEach((part, partIndex) => {
     part.scale.y = 1 + Math.sin(clock.elapsedTime * 6 + partIndex + hider.panic) * 0.025;
   });
-  hider.tongue.visible = distanceToPlayer < 7 && Math.sin(clock.elapsedTime * 9 + hider.panic) > 0.55;
+  hider.stripeParts.forEach((stripe, stripeIndex) => {
+    stripe.material.color.copy(chameleonPalettes[4].color).lerp(chameleonPalettes[stripeIndex % 4].color, 1 - panicMix * 0.7);
+    stripe.visible = panicMix > 0.2 || stripeIndex % 2 === 0;
+  });
+  hider.eyes.forEach(({ eye, pupil }, eyeIndex) => {
+    eye.rotation.y = Math.sin(clock.elapsedTime * 1.7 + hider.panic + eyeIndex * 2.4) * 0.55;
+    eye.rotation.x = Math.cos(clock.elapsedTime * 1.3 + hider.panic + eyeIndex) * 0.25;
+    pupil.scale.setScalar(1 + panicMix * 0.55);
+  });
+  hider.tongue.visible = distanceToPlayer < 8 && Math.sin(clock.elapsedTime * 9 + hider.panic) > 0.35;
+  hider.tongue.scale.y = hider.tongue.visible ? 1 + panicMix * 1.8 : 0.35;
 }
 
 function updateHiders(dt) {
@@ -296,6 +365,7 @@ function updateHiders(dt) {
     hider.group.position.z = THREE.MathUtils.clamp(hider.group.position.z, -26, 26);
     if (collides(hider.group.position, 0.7)) hider.group.position.copy(old);
     hider.group.lookAt(hider.group.position.clone().add(hider.velocity));
+    hider.group.rotation.z = Math.sin(clock.elapsedTime * 2.2 + hider.panic) * 0.08;
 
     if (distance < 2.1) {
       hider.caught = true;
