@@ -30,6 +30,13 @@ const clock = new THREE.Clock();
 const keys = new Set();
 const obstacles = [];
 const hiders = [];
+const chameleonPalettes = [
+  { name: 'leaf', color: new THREE.Color(0x5fce5a), emissive: new THREE.Color(0x123b16) },
+  { name: 'moss', color: new THREE.Color(0x8abf48), emissive: new THREE.Color(0x263510) },
+  { name: 'stone', color: new THREE.Color(0x75818c), emissive: new THREE.Color(0x1d2228) },
+  { name: 'shadow', color: new THREE.Color(0x3d5275), emissive: new THREE.Color(0x101827) },
+  { name: 'panic', color: new THREE.Color(0xff6f9a), emissive: new THREE.Color(0x4a1227) },
+];
 let yaw = 0;
 let pitch = 0;
 let caught = 0;
@@ -99,17 +106,92 @@ function buildArena() {
   }
 }
 
+
+function createChameleonMaterial(index) {
+  const palette = chameleonPalettes[index % (chameleonPalettes.length - 1)];
+  return new THREE.MeshStandardMaterial({
+    color: palette.color.clone(),
+    emissive: palette.emissive.clone(),
+    emissiveIntensity: 0.18,
+    roughness: 0.65,
+    metalness: 0.02,
+  });
+}
+
+function makeEye(x) {
+  const eye = new THREE.Group();
+  const ball = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 16, 10),
+    new THREE.MeshStandardMaterial({ color: 0xf8ffe8, roughness: 0.25 })
+  );
+  const pupil = new THREE.Mesh(
+    new THREE.SphereGeometry(0.07, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0x101315 })
+  );
+  pupil.position.set(0, 0.01, -0.13);
+  eye.position.set(x, 0.35, -0.45);
+  eye.add(ball, pupil);
+  return eye;
+}
+
 function createHider(index, x, z) {
   const group = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.55, 1.15, 6, 12),
-    new THREE.MeshStandardMaterial({ color: [0xff5e7a, 0x5ee6ff, 0xffc857, 0xb388ff, 0x7dff83][index % 5] })
-  );
+  const material = createChameleonMaterial(index);
+  const bellyMaterial = material.clone();
+  bellyMaterial.color.offsetHSL(0.04, -0.18, 0.18);
+
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 1.25, 8, 18), material);
+  body.rotation.z = Math.PI / 2;
   body.castShadow = true;
   group.add(body);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.46, 18, 12), material);
+  head.scale.set(1, 0.85, 1.18);
+  head.position.set(0, 0.08, -0.7);
+  head.castShadow = true;
+  group.add(head);
+
+  const crest = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 5), material);
+  crest.rotation.x = Math.PI;
+  crest.position.set(0, 0.65, -0.56);
+  crest.castShadow = true;
+  group.add(crest);
+
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.48, 18, 10), bellyMaterial);
+  belly.scale.set(1.15, 0.5, 0.78);
+  belly.position.set(0, -0.08, 0.08);
+  group.add(belly);
+
+  const tail = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 10, 28, Math.PI * 1.55), material);
+  tail.rotation.set(Math.PI / 2, 0, Math.PI * 0.65);
+  tail.position.set(0, 0.02, 0.92);
+  tail.castShadow = true;
+  group.add(tail);
+
+  const tongue = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035, 0.02, 1.15, 8),
+    new THREE.MeshStandardMaterial({ color: 0xff7aac, emissive: 0x5a1232, emissiveIntensity: 0.25 })
+  );
+  tongue.rotation.x = Math.PI / 2;
+  tongue.position.set(0, 0.02, -1.35);
+  tongue.visible = false;
+  group.add(tongue);
+
+  group.add(makeEye(-0.24), makeEye(0.24));
   group.position.set(x, 1, z);
   scene.add(group);
-  hiders.push({ group, velocity: new THREE.Vector3(), caught: false, panic: Math.random() * 2, speed: 5.8 + Math.random() * 1.8 });
+  hiders.push({
+    group,
+    bodyParts: [body, head, crest, belly, tail],
+    tongue,
+    material,
+    bellyMaterial,
+    velocity: new THREE.Vector3(),
+    caught: false,
+    panic: Math.random() * 2,
+    speed: 5.8 + Math.random() * 1.8,
+    camouflage: paletteForPosition(new THREE.Vector3(x, 1, z)).color.clone(),
+  });
 }
 
 function resetGame() {
@@ -170,11 +252,40 @@ function nearestCover(from, threat) {
   }, { point: from.clone(), score: Infinity }).point;
 }
 
+
+function paletteForPosition(position) {
+  const nearest = obstacles.slice(4).reduce((best, obstacle) => {
+    const distance = obstacle.mesh.position.distanceToSquared(position);
+    return distance < best.distance ? { distance, obstacle } : best;
+  }, { distance: Infinity, obstacle: null });
+  if (!nearest.obstacle) return chameleonPalettes[0];
+  if (nearest.distance < 18) return chameleonPalettes[2];
+  if (position.z > 10) return chameleonPalettes[1];
+  if (position.x > 10) return chameleonPalettes[3];
+  return chameleonPalettes[0];
+}
+
+function updateCamouflage(hider, distanceToPlayer) {
+  const calmPalette = paletteForPosition(hider.group.position);
+  const panicMix = THREE.MathUtils.clamp((14 - distanceToPlayer) / 10, 0, 1);
+  hider.camouflage.lerp(calmPalette.color, 0.035);
+  const color = hider.camouflage.clone().lerp(chameleonPalettes[4].color, panicMix * 0.65);
+  const pulse = 0.5 + Math.sin(clock.elapsedTime * 10 + hider.panic) * 0.5;
+  hider.material.color.copy(color).offsetHSL(0, 0.12 * pulse * panicMix, 0.06 * pulse * panicMix);
+  hider.material.emissive.copy(calmPalette.emissive).lerp(chameleonPalettes[4].emissive, panicMix);
+  hider.bellyMaterial.color.copy(hider.material.color).offsetHSL(0.03, -0.25, 0.2);
+  hider.bodyParts.forEach((part, partIndex) => {
+    part.scale.y = 1 + Math.sin(clock.elapsedTime * 6 + partIndex + hider.panic) * 0.025;
+  });
+  hider.tongue.visible = distanceToPlayer < 7 && Math.sin(clock.elapsedTime * 9 + hider.panic) > 0.55;
+}
+
 function updateHiders(dt) {
   hiders.forEach((hider) => {
     if (hider.caught) return;
     const toPlayer = hider.group.position.clone().sub(player.position);
     const distance = toPlayer.length();
+    updateCamouflage(hider, distance);
     const target = distance < 15 ? nearestCover(hider.group.position, player.position) : hider.group.position.clone().add(new THREE.Vector3(Math.sin(clock.elapsedTime + hider.panic), 0, Math.cos(clock.elapsedTime * 0.8 + hider.panic)).multiplyScalar(4));
     const desired = target.sub(hider.group.position).normalize().multiplyScalar(hider.speed);
     hider.velocity.lerp(desired, 0.045);
@@ -191,7 +302,7 @@ function updateHiders(dt) {
       hider.group.visible = false;
       caught += 1;
       updateHud();
-      if (caught === hiders.length) endGame('全員発見！あなたの勝ち！');
+      if (caught === hiders.length) endGame('全カメレオン発見！あなたの勝ち！');
     }
   });
 }
