@@ -16,6 +16,8 @@
         <div id="stats">
           <span>見つけた: <strong id="caught-count">0</strong>/<strong id="total-count">0</strong></span>
           <span>残り時間: <strong id="timer">120</strong>s</span>
+          <span>違和感: <strong id="suspicion">0</strong>%</span>
+          <span>ショット: <strong id="shot-status">READY</strong></span>
         </div>
         <button id="restart" type="button">リスタート</button>
       </section>
@@ -24,9 +26,10 @@
 
       <section id="help">
         <p><strong>操作:</strong> WASD/矢印キーで移動、マウスで視点移動、クリックでポインターロック。</p>
-        <p><strong>目的:</strong> 独立して動く目・巻きしっぽ・二股の足・伸びる舌を持つカメレオンAIを捕まえよう。近づくと派手な警戒色になり、離れると背景色にカモフラージュします。</p>
+        <p><strong>目的:</strong> ハンターとして背景の「違和感」を探し、クリックのショットで擬態AIを暴こう。AIは隠れ場所の色をコピーし、ペイント模様とポーズでステージの一部に偽装します。</p>
       </section>
 
+      <div id="reticle" aria-hidden="true"></div>
       <div id="message" role="status" aria-live="polite">クリックして開始</div>
     </main>
 

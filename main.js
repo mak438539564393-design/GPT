@@ -5,6 +5,8 @@ const caughtEl = document.querySelector('#caught-count');
 const totalEl = document.querySelector('#total-count');
 const timerEl = document.querySelector('#timer');
 const messageEl = document.querySelector('#message');
+const suspicionEl = document.querySelector('#suspicion');
+const shotStatusEl = document.querySelector('#shot-status');
 const restartButton = document.querySelector('#restart');
 
 const scene = new THREE.Scene();
@@ -30,6 +32,10 @@ const clock = new THREE.Clock();
 const keys = new Set();
 const obstacles = [];
 const hiders = [];
+const raycaster = new THREE.Raycaster();
+const center = new THREE.Vector2(0, 0);
+let currentSuspicion = 0;
+let shotCooldown = 0;
 const chameleonPalettes = [
   { name: 'leaf', color: new THREE.Color(0x5fce5a), emissive: new THREE.Color(0x123b16) },
   { name: 'moss', color: new THREE.Color(0x8abf48), emissive: new THREE.Color(0x263510) },
@@ -44,6 +50,7 @@ let timeLeft = 120;
 let running = false;
 let finished = false;
 let timerAccumulator = 0;
+const shotDelay = 0.85;
 
 const player = {
   position: new THREE.Vector3(0, 1.7, 24),
@@ -168,7 +175,27 @@ function makeStripe(z, hueShift) {
   );
   stripe.position.set(0, 0.02, z);
   stripe.rotation.y = Math.PI / 2;
+  stripe.userData.isPaintStripe = true;
   return stripe;
+}
+
+function copyStagePaint(position, stripes) {
+  const palette = paletteForPosition(position);
+  const sampled = palette.color.clone();
+  stripes.forEach((stripe, index) => {
+    const offset = Math.sin(position.x * 0.21 + position.z * 0.17 + index) * 0.09;
+    stripe.material.color.copy(sampled).offsetHSL(offset, 0.08, index % 2 ? 0.1 : -0.06);
+  });
+  return sampled;
+}
+
+function choosePoseForCover(position) {
+  const nearest = obstacles.slice(4).reduce((best, obstacle) => {
+    const distance = obstacle.mesh.position.distanceToSquared(position);
+    return distance < best.distance ? { distance, obstacle } : best;
+  }, { distance: Infinity, obstacle: null });
+  if (!nearest.obstacle) return 'blob';
+  return nearest.obstacle.halfX > nearest.obstacle.halfZ ? 'wide' : 'tall';
 }
 
 function createHider(index, x, z) {
@@ -237,7 +264,7 @@ function createHider(index, x, z) {
   group.add(leftEye.eye, rightEye.eye);
   group.position.set(x, 1, z);
   scene.add(group);
-  hiders.push({
+  const hiderData = {
     group,
     bodyParts: [body, head, casque, belly, tail, ...dorsalSpines, ...legs],
     stripeParts: stripes,
@@ -249,9 +276,17 @@ function createHider(index, x, z) {
     caught: false,
     panic: Math.random() * 2,
     speed: 5.8 + Math.random() * 1.8,
-    camouflage: paletteForPosition(new THREE.Vector3(x, 1, z)).color.clone(),
+    camouflage: copyStagePaint(new THREE.Vector3(x, 1, z), stripes),
+    camouflageQuality: 0.35,
+    poseMode: 'blob',
+    wasSpotted: false,
+  };
+  group.traverse((child) => {
+    if (child.isMesh) child.userData.hider = hiderData;
   });
+  hiders.push(hiderData);
 }
+
 
 function resetGame() {
   hiders.forEach((hider) => scene.remove(hider.group));
@@ -263,6 +298,8 @@ function resetGame() {
   caught = 0;
   timeLeft = 120;
   timerAccumulator = 0;
+  currentSuspicion = 0;
+  shotCooldown = 0;
   finished = false;
   running = false;
   updateHud();
@@ -273,7 +310,10 @@ function updateHud() {
   caughtEl.textContent = String(caught);
   totalEl.textContent = String(hiders.length);
   timerEl.textContent = String(timeLeft);
+  suspicionEl.textContent = String(Math.round(currentSuspicion));
+  shotStatusEl.textContent = shotCooldown <= 0 ? 'READY' : `${shotCooldown.toFixed(1)}s`;
 }
+
 
 function showMessage(text) {
   messageEl.textContent = text;
@@ -324,10 +364,16 @@ function paletteForPosition(position) {
   return chameleonPalettes[0];
 }
 
-function updateCamouflage(hider, distanceToPlayer) {
+function updatePaintPose(hider, distanceToPlayer) {
   const calmPalette = paletteForPosition(hider.group.position);
   const panicMix = THREE.MathUtils.clamp((14 - distanceToPlayer) / 10, 0, 1);
-  hider.camouflage.lerp(calmPalette.color, 0.035);
+  if (distanceToPlayer > 16 && hider.velocity.length() < 2.6) {
+    hider.camouflage.lerp(copyStagePaint(hider.group.position, hider.stripeParts), 0.08);
+    hider.poseMode = choosePoseForCover(hider.group.position);
+  } else {
+    hider.camouflage.lerp(calmPalette.color, 0.03);
+    hider.poseMode = 'runner';
+  }
   const color = hider.camouflage.clone().lerp(chameleonPalettes[4].color, panicMix * 0.65);
   const pulse = 0.5 + Math.sin(clock.elapsedTime * 10 + hider.panic) * 0.5;
   hider.material.color.copy(color).offsetHSL(0, 0.12 * pulse * panicMix, 0.06 * pulse * panicMix);
@@ -336,17 +382,22 @@ function updateCamouflage(hider, distanceToPlayer) {
   hider.bodyParts.forEach((part, partIndex) => {
     part.scale.y = 1 + Math.sin(clock.elapsedTime * 6 + partIndex + hider.panic) * 0.025;
   });
+  hider.camouflageQuality = THREE.MathUtils.clamp((1 - panicMix) * (hider.poseMode === 'runner' ? 0.42 : 0.86), 0.12, 0.92);
   hider.stripeParts.forEach((stripe, stripeIndex) => {
-    stripe.material.color.copy(chameleonPalettes[4].color).lerp(chameleonPalettes[stripeIndex % 4].color, 1 - panicMix * 0.7);
-    stripe.visible = panicMix > 0.2 || stripeIndex % 2 === 0;
+    const copied = hider.camouflage.clone().offsetHSL(stripeIndex * 0.035, 0.06, stripeIndex % 2 ? 0.12 : -0.08);
+    stripe.material.color.copy(chameleonPalettes[4].color).lerp(copied, hider.camouflageQuality);
+    stripe.visible = hider.camouflageQuality > 0.55 || panicMix > 0.2 || stripeIndex % 2 === 0;
   });
   hider.eyes.forEach(({ eye, pupil }, eyeIndex) => {
     eye.rotation.y = Math.sin(clock.elapsedTime * 1.7 + hider.panic + eyeIndex * 2.4) * 0.55;
     eye.rotation.x = Math.cos(clock.elapsedTime * 1.3 + hider.panic + eyeIndex) * 0.25;
     pupil.scale.setScalar(1 + panicMix * 0.55);
   });
-  hider.tongue.visible = distanceToPlayer < 8 && Math.sin(clock.elapsedTime * 9 + hider.panic) > 0.35;
+  hider.tongue.visible = hider.wasSpotted || (distanceToPlayer < 8 && Math.sin(clock.elapsedTime * 9 + hider.panic) > 0.35);
   hider.tongue.scale.y = hider.tongue.visible ? 1 + panicMix * 1.8 : 0.35;
+  if (hider.poseMode === 'wide') hider.group.scale.lerp(new THREE.Vector3(1.45, 0.72, 0.92), 0.05);
+  else if (hider.poseMode === 'tall') hider.group.scale.lerp(new THREE.Vector3(0.74, 1.35, 0.84), 0.05);
+  else hider.group.scale.lerp(new THREE.Vector3(1, 1, 1), 0.08);
 }
 
 function updateHiders(dt) {
@@ -354,10 +405,11 @@ function updateHiders(dt) {
     if (hider.caught) return;
     const toPlayer = hider.group.position.clone().sub(player.position);
     const distance = toPlayer.length();
-    updateCamouflage(hider, distance);
-    const target = distance < 15 ? nearestCover(hider.group.position, player.position) : hider.group.position.clone().add(new THREE.Vector3(Math.sin(clock.elapsedTime + hider.panic), 0, Math.cos(clock.elapsedTime * 0.8 + hider.panic)).multiplyScalar(4));
+    updatePaintPose(hider, distance);
+    const exposed = hider.wasSpotted || currentSuspicion > 72;
+    const target = distance < 15 || exposed ? nearestCover(hider.group.position, player.position) : hider.group.position.clone().add(new THREE.Vector3(Math.sin(clock.elapsedTime + hider.panic), 0, Math.cos(clock.elapsedTime * 0.8 + hider.panic)).multiplyScalar(4));
     const desired = target.sub(hider.group.position).normalize().multiplyScalar(hider.speed);
-    hider.velocity.lerp(desired, 0.045);
+    hider.velocity.lerp(desired, exposed ? 0.085 : 0.035);
     const delta = hider.velocity.clone().multiplyScalar(dt);
     const old = hider.group.position.clone();
     hider.group.position.add(delta);
@@ -386,6 +438,39 @@ function updatePlayer(dt) {
   camera.rotation.set(pitch, yaw, 0, 'YXZ');
 }
 
+function scanForVisualMismatch() {
+  raycaster.setFromCamera(center, camera);
+  const meshes = [];
+  hiders.forEach((hider) => {
+    if (!hider.caught) hider.group.traverse((child) => { if (child.isMesh) meshes.push(child); });
+  });
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  if (!hit?.object.userData.hider) {
+    currentSuspicion = THREE.MathUtils.lerp(currentSuspicion, 0, 0.12);
+    return null;
+  }
+  const hider = hit.object.userData.hider;
+  const mismatch = (1 - hider.camouflageQuality) * 100;
+  const distanceBonus = THREE.MathUtils.clamp((18 - hit.distance) * 3, 0, 38);
+  currentSuspicion = THREE.MathUtils.lerp(currentSuspicion, mismatch + distanceBonus, 0.22);
+  return hider;
+}
+
+function shootPaintDetector() {
+  if (!running || finished || shotCooldown > 0) return;
+  shotCooldown = shotDelay;
+  const hider = scanForVisualMismatch();
+  if (!hider) return;
+  hider.wasSpotted = true;
+  if (currentSuspicion > 34 || hider.group.position.distanceTo(player.position) < 10) {
+    hider.caught = true;
+    hider.group.visible = false;
+    caught += 1;
+    updateHud();
+    if (caught === hiders.length) endGame('全カメレオン発見！あなたの勝ち！');
+  }
+}
+
 function endGame(text) {
   finished = true;
   running = false;
@@ -397,8 +482,11 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   if (running && !finished) {
+    shotCooldown = Math.max(0, shotCooldown - dt);
     updatePlayer(dt);
+    scanForVisualMismatch();
     updateHiders(dt);
+    updateHud();
     timerAccumulator += dt;
     if (timerAccumulator >= 1) {
       timeLeft -= Math.floor(timerAccumulator);
@@ -417,7 +505,10 @@ window.addEventListener('mousemove', (event) => {
   yaw -= event.movementX * 0.0022;
   pitch = THREE.MathUtils.clamp(pitch - event.movementY * 0.0022, -1.25, 1.25);
 });
-canvas.addEventListener('click', () => canvas.requestPointerLock());
+canvas.addEventListener('click', () => {
+  if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+  else shootPaintDetector();
+});
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement === canvas && !finished) {
     running = true;

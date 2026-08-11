@@ -83,3 +83,27 @@ button:hover { filter: brightness(1.08); }
   #hud { align-items: flex-start; flex-direction: column; }
   #help { right: 18px; font-size: 0.9rem; }
 }
+
+
+#reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
+  width: 34px;
+  height: 34px;
+  border: 2px solid rgba(234, 255, 208, 0.85);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 18px rgba(131, 255, 122, 0.55), inset 0 0 18px rgba(67, 232, 163, 0.25);
+  pointer-events: none;
+}
+
+#reticle::before, #reticle::after {
+  content: "";
+  position: absolute;
+  background: rgba(234, 255, 208, 0.9);
+}
+
+#reticle::before { left: 50%; top: -10px; width: 2px; height: 54px; transform: translateX(-50%); }
+#reticle::after { top: 50%; left: -10px; width: 54px; height: 2px; transform: translateY(-50%); }
